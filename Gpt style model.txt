@@ -1,0 +1,63 @@
+import torch
+from datasets import load_dataset
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from sklearn.metrics import accuracy_score, f1_score
+
+dev = 'cuda' if torch.cuda.is_available() else 'cpu'
+ds = load_dataset('stanfordnlp/imdb').shuffle(seed=0)
+tr, te = ds['train'].select(range(1000)), ds['test'].select(range(200))
+
+tok = AutoTokenizer.from_pretrained('distilgpt2')
+tok.pad_token = tok.eos_token
+
+model = AutoModelForSequenceClassification.from_pretrained(
+    'distilgpt2', num_labels=2
+).to(dev)
+model.config.pad_token_id = tok.pad_token_id
+
+enc = lambda t: tok(
+    t, truncation=True, max_length=128, padding=True,
+    return_tensors='pt'
+).to(dev)
+
+opt = torch.optim.AdamW(model.parameters(), lr=5e-5)
+
+model.train()
+for e in range(2):
+    for i in range(0, 1000, 16):
+        b = tr[i:i+16]
+        loss = model(
+            **enc(b['text']),
+            labels=torch.tensor(b['label']).to(dev)
+        ).loss
+        loss.backward()
+        opt.step()
+        opt.zero_grad()
+
+    print('epoch', e+1, 'loss', round(loss.item(), 4))
+
+
+def predict(t):
+    model.eval()
+    with torch.no_grad():
+        return model(**enc(t)).logits.argmax(-1).cpu().tolist()
+
+
+pred = []
+for i in range(0, 200, 32):
+    pred += predict(te[i:i+32]['text'])
+
+print(
+    'Accuracy:', round(accuracy_score(te['label'], pred), 4),
+    '| F1:', round(f1_score(te['label'], pred), 4)
+)
+
+new = [
+    "This movie was fantastic, I loved it.",
+    "Terrible film, a complete waste of time.",
+    "Brilliant acting and a touching story.",
+    "Boring plot and bad acting."
+]
+
+for r, p in zip(new, predict(new)):
+    print(['NEGATIVE', 'POSITIVE'][p], '->', r)

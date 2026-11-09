@@ -1,0 +1,66 @@
+import torch
+import torch.nn as nn
+import matplotlib.pyplot as plt
+from torchvision import datasets
+
+x = datasets.MNIST('.', download=True).data[:10000].float().div(127.5).sub(1).view(-1, 784)
+
+G = nn.Sequential(
+    nn.Linear(100, 256),
+    nn.ReLU(),
+    nn.Linear(256, 784),
+    nn.Tanh()
+)
+
+D = nn.Sequential(
+    nn.Linear(784, 256),
+    nn.LeakyReLU(0.2),
+    nn.Linear(256, 1)
+)
+
+bce = nn.BCEWithLogitsLoss()
+oG = torch.optim.Adam(G.parameters(), 2e-4, betas=(0.5, 0.999))
+oD = torch.optim.Adam(D.parameters(), 2e-4, betas=(0.5, 0.999))
+
+ones, zeros = torch.ones(100, 1), torch.zeros(100, 1)
+z0 = torch.randn(8, 100)
+dl, gl, snaps = [], [], {}
+
+for e in range(1, 31):
+    for i in range(0, 10000, 100):
+        r = x[i:i+100]
+        f = G(torch.randn(100, 100))
+
+        ld = bce(D(r), ones) + bce(D(f.detach()), zeros)
+        oD.zero_grad()
+        ld.backward()
+        oD.step()
+
+        lg = bce(D(f), ones)
+        oG.zero_grad()
+        lg.backward()
+        oG.step()
+
+        dl.append(ld.item())
+        gl.append(lg.item())
+
+    if e in (1, 10, 30):
+        snaps[e] = G(z0).detach()
+
+    if e % 5 == 0:
+        print('epoch', e, 'D loss', round(ld.item(), 3), 'G loss', round(lg.item(), 3))
+
+plt.plot(dl, label='D loss')
+plt.plot(gl, label='G loss')
+plt.xlabel('iteration')
+plt.legend()
+plt.show()
+
+for k, e in enumerate(snaps):
+    for j in range(8):
+        plt.subplot(3, 8, k*8 + j + 1)
+        plt.imshow(snaps[e][j].view(28, 28), cmap='gray')
+        plt.axis('off')
+
+plt.suptitle('Rows: epoch 1, 10, 30')
+plt.show()

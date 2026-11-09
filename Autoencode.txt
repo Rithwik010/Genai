@@ -1,0 +1,57 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import matplotlib.pyplot as plt
+from torchvision import datasets
+
+x = datasets.MNIST('.', download=True).data[:6000].float().div(255).view(-1, 784)
+tr, va = x[:5000], x[5000:]
+
+
+def net(p):
+    return nn.Sequential(
+        nn.Linear(784, 128),
+        nn.ReLU(),
+        nn.Dropout(p),
+        nn.Linear(128, 784),
+        nn.Sigmoid()
+    )
+
+
+def train(m, wd):
+    opt = torch.optim.Adam(m.parameters(), 1e-3, weight_decay=wd)
+    for e in range(10):
+        m.train()
+        for i in range(0, 5000, 100):
+            b = tr[i:i+100]
+            loss = F.mse_loss(m(b), b)
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+
+        m.eval()
+        with torch.no_grad():
+            print(
+                e+1,
+                'train', round(F.mse_loss(m(tr), tr).item(), 4),
+                'val', round(F.mse_loss(m(va), va).item(), 4)
+            )
+
+
+base, reg = net(0), net(0.2)
+print('BASELINE')
+train(base, 0)
+print('REGULARIZED')
+train(reg, 1e-4)
+
+with torch.no_grad():
+    rows = [va[:8], base(va[:8]), reg(va[:8])]
+
+for r in range(3):
+    for c in range(8):
+        plt.subplot(3, 8, r*8 + c + 1)
+        plt.imshow(rows[r][c].view(28, 28), cmap='gray')
+        plt.axis('off')
+
+plt.suptitle('Row1: Original | Row2: Baseline | Row3: Regularized')
+plt.show()

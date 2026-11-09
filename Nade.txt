@@ -1,0 +1,59 @@
+import torch
+import torch.nn.functional as F
+import matplotlib.pyplot as plt
+from sklearn.datasets import load_digits
+
+X = torch.tensor(load_digits().data / 16, dtype=torch.float32)
+X = (X > 0.5).float()[torch.randperm(len(X))]
+tr, va = X[:1500], X[1500:]
+
+D, H = 64, 64
+
+W = (torch.randn(H, D) * 0.1).requires_grad_()
+V = (torch.randn(D, H) * 0.1).requires_grad_()
+c = torch.zeros(H, requires_grad=True)
+b = torch.zeros(D, requires_grad=True)
+
+
+def nade(x, gen=False):
+    a = c.expand(len(x), H)
+    out = []
+    for i in range(D):
+        l = torch.sigmoid(a) @ V[i] + b[i]
+        if gen:
+            x[:, i] = torch.bernoulli(torch.sigmoid(l))
+        out.append(l)
+        a = a + x[:, i:i+1] * W[:, i]
+    return torch.stack(out, 1)
+
+
+nll = lambda x: F.binary_cross_entropy_with_logits(
+    nade(x), x, reduction='sum'
+) / len(x)
+
+opt = torch.optim.Adam([W, V, c, b], 0.01)
+
+for e in range(20):
+    for i in range(0, 1500, 100):
+        loss = nll(tr[i:i+100])
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+
+    with torch.no_grad():
+        print(
+            e+1,
+            'train NLL', round(nll(tr).item(), 2),
+            'val NLL', round(nll(va).item(), 2)
+        )
+
+s = torch.zeros(16, D)
+with torch.no_grad():
+    nade(s, True)
+
+for k in range(16):
+    plt.subplot(2, 8, k+1)
+    plt.imshow(s[k].view(8, 8), cmap='gray')
+    plt.axis('off')
+
+plt.show()
